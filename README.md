@@ -8,7 +8,9 @@
     <a href="https://pypistats.org/packages/opensearch-logger"><img alt="PyPI Downloads" src="https://img.shields.io/pypi/dm/opensearch-logger?logo=python&logoColor=white&color=blue"></a>
 </p>
 
-This library provides a standard Python [logging][logging] handler compatible with [OpenSearch][opensearch] suite.
+This library provides a standard Python [logging][logging] handler compatible with [OpenSearch][opensearch] suite. It is
+a fork of `vduseev/opensearch-logger` to support asynchronous OpenSearch clients and to delegate the task of getting an
+OpenSearch connection to external code.
 
 The **goals** of this project are
 
@@ -32,21 +34,37 @@ pip install opensearch-logger
 
 ## Usage
 
-Just add the OpenSearch handler to your Python logger
+Add the OpenSearch handler to your Python logger and give it a function to call to get an OpenSearch connection.
 
 ```python
 import logging
 from opensearch_logger import OpenSearchHandler
+import opensearchpy
+
+class ClientManager:
+	def __init__(self):
+		self._client = None
+
+	async def get_opensearch_client(self) -> opensearchpy.AsyncOpenSearch:
+		# Perform other processing to determine if you need to reinitialise the client here
+
+		if self._client is None:
+			self._client = opensearchpy.AsyncOpenSearch(
+				hosts=["https://localhost:9200"],
+				http_auth=("admin", "admin"),
+				http_compress=True,
+				use_ssl=True,
+				verify_certs=False,
+				ssl_assert_hostname=False,
+				ssl_show_warn=False,
+			)
+
+		return self._client
+
 
 handler = OpenSearchHandler(
+	get_opensearch_client,
     index_name="my-logs",
-    hosts=["https://localhost:9200"],
-    http_auth=("admin", "admin"),
-    http_compress=True,
-    use_ssl=True,
-    verify_certs=False,
-    ssl_assert_hostname=False,
-    ssl_show_warn=False,
 )
 
 logger = logging.getLogger(__name__)
@@ -77,13 +95,9 @@ logger.info(
 
 ## Configuration
 
-The `OpenSearchHandler` constructor takes several arguments described in the table below.
-These parameters specify the name of the index, buffering settings, and some general behavior.
-None of this parameters are mandatory.
-
-All other keyword arguments are passed directly "as is" to the underlying `OpenSearch` python client.
-Full list of connection parameters can be found in [`opensearch-py`][opensearch-py] docs.
-At least one connection parameter **must** be provided, otherwise a `TypeError` will be thrown.
+The `OpenSearchHandler` constructor takes several arguments described in the table below. These parameters specify the
+name of the index, buffering settings, and some general behavior. None of these parameters are mandatory. The only
+mandatory parameter is the method you pass in which returns an OpenSearch connection.
 
 ## Logging parameters
 

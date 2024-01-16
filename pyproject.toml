@@ -34,7 +34,7 @@ classifiers = [
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
 ]
-dependencies = ["opensearch-py"]
+dependencies = ["opensearch-py[async]"]
 
 [project.urls]
 documentation = "https://github.com/vduseev/opensearch-logger"

@@ -24,11 +24,11 @@ from threading import Lock, Timer
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
 
-from opensearchpy import OpenSearch
 from opensearchpy import helpers
 
 from .serializers import OpenSearchLoggerSerializer
 from .version import __version__
+from .adapters import AsyncOpenSearchAdapter
 
 
 class RotateFrequency(Enum):
@@ -67,6 +67,7 @@ class OpenSearchHandler(logging.Handler):
 
     def __init__(
         self,
+        get_opensearch_client,
         index_name: str = "python-logs",
         index_rotate: Union[RotateFrequency, str] = RotateFrequency.DAILY,
         index_date_format: str = "%Y.%m.%d",
@@ -76,13 +77,8 @@ class OpenSearchHandler(logging.Handler):
         extra_fields: Optional[Dict[str, Any]] = None,
         raise_on_index_exc: bool = False,
         is_data_stream: bool = False,
-        **kwargs: Any,
     ):
         """Initialize OpenSearch logging handler.
-
-        All of the parameters have default values except for connection parameters.
-        Connection parameters are read from kwargs and passed directly to OpenSearch
-        client. See opensearch-py documentation for the full list of accepted parameters.
 
         By default, the corresponsing date will be appended to the index_name. Consider
         a week between Nov 8, 2021 (Monday) and Nov 14, 2021 (Sunday). In case It Is
@@ -96,6 +92,7 @@ class OpenSearchHandler(logging.Handler):
         * python-logs for NEVER (no date gets appended)
 
         Args:
+            get_opensearch_client: Async function to call to return an AsyncOpenSearch client.
             index_name: Base name for the index with logs. Example: "my-logs"
             index_rotate: Index rotation frequency. Example: OpenSearchHandler.DAILY.
             index_date_format: Format of the date appended to index name.
@@ -105,7 +102,6 @@ class OpenSearchHandler(logging.Handler):
                 irrespective of whether the buffer is full or not.
             extra_fields: Dict of value that will be appended to every message sent.
             raise_on_index_exc: Raise exception if indexing to OpenSearch fails.
-            kwargs: Connection parameters for OpenSearch client.
 
         Examples:
             The configuration below is suitable for connection to an OpenSearch docker
@@ -131,13 +127,6 @@ class OpenSearchHandler(logging.Handler):
         """
         logging.Handler.__init__(self)
 
-        # Throw an exception if connection arguments for Openserach client are empty
-        if not kwargs:
-            raise TypeError("Missing OpenSearch connection parameters.")
-
-        # Arguments that will be passed to OpenSearch client object
-        self.opensearch_kwargs = kwargs
-
         # Bufferization and flush settings
         self.buffer_size = buffer_size
         self.flush_frequency = flush_frequency
@@ -160,7 +149,8 @@ class OpenSearchHandler(logging.Handler):
             "version"
         ] = OpenSearchHandler._ECS_VERSION
 
-        self._client: Optional[OpenSearch] = None
+        self._adapter = AsyncOpenSearchAdapter(get_opensearch_client)
+
         self._buffer: List[Dict[str, Any]] = []
         self._buffer_lock: Lock = Lock()
         self._timer: Optional[Timer] = None
@@ -183,17 +173,6 @@ class OpenSearchHandler(logging.Handler):
         except socket.gaierror:  # pragma: no cover
             ip = ""
         host_dict["ip"] = ip
-
-    def test_opensearch_connection(self) -> bool:
-        """Returns True if the handler can ping the OpenSearch servers.
-
-        Can be used to confirm the setup of a handler has been properly done and confirm
-        that things like the authentication are working properly.
-
-        Returns:
-            bool: True if the connection against elasticserach host was successful.
-        """
-        return self._get_opensearch_client().ping()
 
     def flush(self) -> None:
         """Flush the buffer into OpenSearch."""
@@ -225,11 +204,8 @@ class OpenSearchHandler(logging.Handler):
                     for record in logs_buffer
                 ]
 
-                helpers.bulk(
-                    client=self._get_opensearch_client(),
-                    actions=actions,
-                    stats_only=True,
-                )
+
+                self._adapter.bulk(actions=actions, stats_only=True)
 
             except Exception as exception:  # noqa: B902
                 if self.raise_on_index_exc:
@@ -256,11 +232,6 @@ class OpenSearchHandler(logging.Handler):
             self.flush()
         else:
             self._schedule_flush()
-
-    def _get_opensearch_client(self) -> OpenSearch:
-        if self._client is None:
-            self._client = OpenSearch(**self.opensearch_kwargs)
-        return self._client
 
     def _schedule_flush(self) -> None:
         if self._timer is None:
