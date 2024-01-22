@@ -233,6 +233,10 @@ class OpenSearchHandler(logging.Handler):
         else:
             self._schedule_flush()
 
+    def get_adapter(self) -> AsyncOpenSearchAdapter:
+        """Return the OpenSearch adapter."""
+        return self._adapter
+
     def _schedule_flush(self) -> None:
         if self._timer is None:
             self._timer = Timer(self.flush_frequency, self.flush)
